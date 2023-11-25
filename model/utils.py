@@ -2,6 +2,7 @@ import torch
 from torch import nn, Tensor
 import math
 
+
 class PositionalEmbedding(nn.Module):
     def __init__(self, embedding_dim: int, theta: int = 10000):
         """
@@ -25,7 +26,7 @@ class PositionalEmbedding(nn.Module):
         Returns:
             Tensor: The tensor with positional embeddings concatenated with the input positions. Shape: (seq_len, embedding_dim)
         """
-        embedding = math.log(self.theta) / ((self.embedding_dim//2) - 1)
-        embedding = torch.exp(torch.arange((self.embedding_dim//2)) * -embedding)
+        embedding = math.log(self.theta) / ((self.embedding_dim // 2) - 1)
+        embedding = torch.exp(torch.arange((self.embedding_dim // 2)) * -embedding)
         embedding = positions[:, None] * embedding[None, :]
         return torch.cat((embedding.sin(), embedding.cos()), dim=-1)

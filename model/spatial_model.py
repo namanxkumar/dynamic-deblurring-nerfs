@@ -25,9 +25,6 @@ class SceneSpatialVoxelModel(nn.Module):
         - min_bound_per_axis (float): Minimum bound per axis.
         - max_bound_per_axis (float): Maximum bound per axis.
         - voxel_dim (int): Dimension of the voxel.
-
-        Returns:
-        - None
         """
         super().__init__()
         self.min_bound = min_bound_per_axis
@@ -51,7 +48,7 @@ class SceneSpatialVoxelModel(nn.Module):
         self, warped_sample_points: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Performs forward pass of the SceneSpatialVoxelModel module.
+        Queries the voxel grid at the given location with trilinear interpolation
 
         Args:
         - warped_sample_points (torch.Tensor): Warped sample points tensor of shape (batch_size, 3).
@@ -82,17 +79,16 @@ class SceneSpatialDensityModel(nn.Module):
         Initializes the SceneSpatialDensityModel module.
         """
         super().__init__()
-        pass
 
     def forward(self, spatial_voxel_features) -> torch.Tensor:
         """
-        Performs forward pass of the SceneSpatialDensityModel module.
+        Computes the density from voxel features.
 
         Args:
-        - spatial_voxel_features (torch.Tensor): Spatial voxel features.
+        - spatial_voxel_features (torch.Tensor): Spatial voxel features. Shape: (batch_size, voxel_dim)
 
         Returns:
-        - density (torch.Tensor): Density at the given location and time step.
+        - density (torch.Tensor): Density at the given location and time step. Shape: (batch_size, 1)
         """
         return F.relu(spatial_voxel_features)
 
@@ -132,19 +128,20 @@ class SceneSpatialColorModel(nn.Module):
             torch.nn.ReLU(),
         )
 
-        self.view_mlp = torch.nn.Linear(hidden_dim + view_direction_positional_embedding_dim, 3)
+        self.view_mlp = torch.nn.Linear(
+            hidden_dim + view_direction_positional_embedding_dim, 3
+        )
 
-    def forward(self, spatial_voxel_features, view_directions):
+    def forward(self, spatial_voxel_features, view_direction):
         """
-        Performs forward pass of the SceneSpatialColorModel module.
+        Computes the color from voxel features in a given view direction.
 
         Args:
-        - spatial_voxel_features (torch.Tensor): Spatial voxel features.
-        - view_directions (torch.Tensor): View directions.
-        - time_step: Time step.
+        - spatial_voxel_features (torch.Tensor): Spatial voxel features. Shape: (batch_size, voxel_dim)
+        - view_direction (torch.Tensor): View directions. Shape: (batch_size, 3)
 
         Returns:
-        - color (torch.Tensor): Color at the given location.
+        - color (torch.Tensor): Color at the given location. Shape: (batch_size, 3)
         """
         feature_encoding = torch.cat(
             (
@@ -157,12 +154,12 @@ class SceneSpatialColorModel(nn.Module):
 
         view_direction_encoding = torch.cat(
             (
-                view_directions,
-                self.view_direction_positional_embedding(view_directions),
+                view_direction,
+                self.view_direction_positional_embedding(view_direction),
             ),
             dim=-1,
         )
-        
+
         view_features = self.view_mlp(
             torch.cat(
                 (
@@ -174,6 +171,7 @@ class SceneSpatialColorModel(nn.Module):
         )
 
         return torch.sigmoid(view_features)
+
 
 # Code for rodynrf implemented voxel field using TensorRF
 #
