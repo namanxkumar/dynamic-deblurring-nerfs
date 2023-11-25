@@ -18,6 +18,7 @@ class MotionModel(nn.Module):
         skip_connections: List[int] = [4],
         hidden_dim: int = 256,
         positional_embedding_dim: int = 16,
+        num_matrices: int = 1,
     ) -> None:
         """
         Initializes the MotionModel.
@@ -35,8 +36,8 @@ class MotionModel(nn.Module):
 
         self.basis_function_matrix = nn.Parameter(
             self._initialize_dct_basis_function_matrix(
-                num_basis_coefficients, num_time_steps
-            )
+                num_time_steps, num_basis_coefficients // num_matrices
+            ).repeat(1, num_matrices)
         )
 
         self.skip_connections = skip_connections
@@ -61,7 +62,7 @@ class MotionModel(nn.Module):
 
     @staticmethod
     def _initialize_dct_basis_function_matrix(
-        num_basis_coefficients: int, num_time_steps: int
+        num_time_steps: int, num_basis_coefficients: int
     ) -> torch.Tensor:
         """
         Initializes the DCT basis function matrix.
@@ -148,10 +149,11 @@ class CameraMotionModel(MotionModel):
             skip_connections=skip_connections,
             hidden_dim=hidden_dim,
             positional_embedding_dim=positional_embedding_dim,
+            num_matrices=2,
         )
 
     def _compute_camera_pose(
-        self, se3_coefficients: torch.Tensor, time_step: int
+        self, se3_coefficients: torch.Tensor, time_step: int, warmup: bool = False
     ) -> torch.Tensor:
         """
         Computes the camera pose at the given time step based on the se(3) coefficients.
@@ -172,11 +174,19 @@ class CameraMotionModel(MotionModel):
             rotation_coefficient_z,
         ) = torch.chunk(se3_coefficients, 6, dim=-1)
 
-        translation_basis_coefficients, rotation_basis_coefficients = torch.chunk(
-            torch.index_select(self.basis_function_matrix, 0, torch.squeeze(time_step)),
-            2,
-            dim=-1,
-        )
+        if warmup:
+            with torch.no_grad():
+                translation_basis_coefficients, rotation_basis_coefficients = torch.chunk(
+                    torch.index_select(self.basis_function_matrix, 0, torch.squeeze(time_step)),
+                    2,
+                    dim=-1,
+                )
+        else:
+            translation_basis_coefficients, rotation_basis_coefficients = torch.chunk(
+                torch.index_select(self.basis_function_matrix, 0, torch.squeeze(time_step)),
+                2,
+                dim=-1,
+            )
 
         return torch.cat(
             [
@@ -214,7 +224,7 @@ class CameraMotionModel(MotionModel):
             dim=-1,
         )
 
-    def forward(self, time_step: torch.Tensor) -> torch.Tensor:
+    def forward(self, time_step: torch.Tensor, warmup: bool = False) -> torch.Tensor:
         """
         Computes the se(3) camera pose at the given time step.
 
@@ -246,7 +256,7 @@ class CameraMotionModel(MotionModel):
 
         se3_coefficients = self.output_layer(hidden_state)
 
-        return self._compute_camera_pose(se3_coefficients, time_step)
+        return self._compute_camera_pose(se3_coefficients, time_step, warmup=warmup)
 
 
 class SceneMotionModel(MotionModel):

@@ -1,6 +1,5 @@
 import torch
 from torch import nn
-from torch.nn import functional as F
 
 from einops import rearrange
 
@@ -46,9 +45,9 @@ class SamplePointsOnRay(nn.Module):
 class RenderRay(nn.Module):
     def __init__(
         self,
+        num_time_steps: int,
         num_samples: int,
         num_scene_trajectory_basis_coefficients: int,
-        num_time_steps: int,
         num_voxels_per_axis: int,
         min_bound_per_axis: float,
         max_bound_per_axis: float,
@@ -62,9 +61,9 @@ class RenderRay(nn.Module):
         - num_samples (int): Number of samples on the ray.
         - num_scene_trajectory_basis_coefficients (int): Number of coefficients for the scene trajectory basis.
         - num_time_steps (int): Number of time steps.
-        - num_voxels_per_axis (int): Number of voxels per axis.
-        - min_bound_per_axis (float): Minimum bound per axis.
-        - max_bound_per_axis (float): Maximum bound per axis.
+        - num_voxels_per_axis (int): Number of voxels per voxel grid axis.
+        - min_bound_per_axis (float): Minimum bound per voxel grid axis.
+        - max_bound_per_axis (float): Maximum bound per voxel grid axis.
         - voxel_dim (int): Dimension of the voxel.
         - color_model_hidden_dim (int): Hidden dimension of the color model.
         """
