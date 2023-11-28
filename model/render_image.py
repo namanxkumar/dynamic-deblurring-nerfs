@@ -11,7 +11,7 @@ from .motion_models import CameraMotionModel
 class RenderImage(nn.Module):
     def __init__(
         self,
-        image_size: int,
+        camera_intrinsics: torch.Tensor,
         num_time_steps: int,
         num_samples_per_ray: int,
         num_scene_trajectory_basis_coefficients: int,
@@ -26,7 +26,7 @@ class RenderImage(nn.Module):
         Initializes the RenderImage module.
 
         Args:
-        - image_size (int): Size of the image.
+        - camera_intrinsics (torch.Tensor): Camera intrinsics. Shape: (3, 3)
         - num_time_steps (int): Number of time steps.
         - num_samples_per_ray (int): Number of samples per ray.
         - num_scene_trajectory_basis_coefficients (int): Number of coefficients for the scene trajectory basis.
@@ -38,7 +38,13 @@ class RenderImage(nn.Module):
         - color_model_hidden_dim (int): Hidden dimension of the color model.
         """
         super().__init__()
-        self.image_size = image_size
+        self.fx = camera_intrinsics[0, 0]
+        self.fy = camera_intrinsics[1, 1]
+        self.cx = camera_intrinsics[0, 2]
+        self.cy = camera_intrinsics[1, 2]
+        self.image_width = camera_intrinsics[0, 2] * 2
+        self.image_height = camera_intrinsics[1, 2] * 2
+
         self.num_time_steps = num_time_steps
         self.camera_motion_model = CameraMotionModel(
             num_basis_coefficients=num_camera_trajectory_basis_coefficients,
@@ -161,50 +167,57 @@ class RenderImage(nn.Module):
         """
         batch_size = se3.shape[0]
         u, w = se3[:, :3], se3[:, 3:]
-        
+
         w_x = self._so3_to_wx(w)
         theta = torch.norm(w, dim=1, keepdim=True)
-        
+
         SE3 = torch.zeros((batch_size, 4, 4))
         SE3[:, :3, :3] = self._wx_to_SO3(w_x=w_x, theta=theta)
-        
+
         V = (
             torch.eye(3).unsqueeze(0).repeat(batch_size, 1, 1)
             + self._taylor_expansion_B(theta).unsqueeze(-1).repeat(1, 3, 3) * w_x
-            + self._taylor_expansion_C(theta).unsqueeze(-1).repeat(1, 3, 3) * (w_x @ w_x)
+            + self._taylor_expansion_C(theta).unsqueeze(-1).repeat(1, 3, 3)
+            * (w_x @ w_x)
         )
         SE3[:, :3, 3] = torch.matmul(V, u)
         SE3[:, 3, 3] = 1
         return SE3
 
-    def _get_ray_directions(self, camera_pose: torch.Tensor) -> torch.Tensor:
+    def _get_ray(self, camera_pose: torch.Tensor) -> torch.Tensor:
         """
         Gets the ray directions.
 
         Args:
-        - camera_pose (torch.Tensor): Camera pose in SE(3). Shape: (batch_size, 6)
+        - camera_pose (torch.Tensor): Camera pose in SE(3). Shape: (4, 4)
 
         Returns:
-        - ray_directions (torch.Tensor): Ray directions. Shape: (batch_size, 3, image_size, image_size)
+        - ray_directions (torch.Tensor): Ray directions. Shape: (image_height, image_width, 3)
         """
-        # TODO: Implement this function.
-        batch_size = camera_pose.shape[0]
-        ray_directions = torch.zeros((batch_size, 3, self.image_size, self.image_size))
-        for i in range(self.image_size):
-            for j in range(self.image_size):
-                ray_directions[:, :, i, j] = torch.matmul(
-                    camera_pose[:, :3, :3],
-                    torch.tensor(
-                        [
-                            [i - self.image_size / 2],
-                            [j - self.image_size / 2],
-                            [self.image_size / 2],
-                        ]
-                    ),
-                ).squeeze(2)
-        return ray_directions
+        # batch_size = camera_pose.shape[0]
+        xx, yy = torch.meshgrid(
+            torch.arange(self.image_width),
+            torch.arange(self.image_height),
+            indexing="xy",
+        )
+        directions = torch.stack(
+            [
+                (xx - self.cx) / self.fx,
+                -((yy - self.cy) / self.fy),
+                -torch.ones_like(xx),
+            ],
+            dim=-1,
+        )
 
-    def forward(self, time_step, warmup=False) -> torch.Tensor:
+        directions = torch.sum(
+            directions[..., None, :] * camera_pose[:3, :3], dim=-1
+        )
+
+        origin = camera_pose[:3, 3].expand(directions.shape)
+
+        return origin, directions
+
+    def forward(self, time_step: torch.Tensor, warmup: bool = False) -> torch.Tensor:
         """
         Performs forward pass of the RenderImage module.
 
@@ -212,9 +225,18 @@ class RenderImage(nn.Module):
         - time_step (torch.Tensor): Time step. Shape: (batch_size, 1)
 
         Returns:
-        - image (torch.Tensor): Rendered image. Shape: (batch_size, 3, image_size, image_size)
+        - image (torch.Tensor): Rendered image. Shape: (batch_size, 3, image_height, image_width)
         """
+        batch_size = time_step.shape[0]
         camera_pose_se3 = self.camera_motion_model(time_step, warmup)
         camera_pose_SE3 = self._se3_to_SE3(camera_pose_se3)
-        ray_directions = self._get_ray_directions(camera_pose_SE3)
-        ray_start = camera_pose_SE3[:, :3, 3].unsqueeze(1).repeat(1, self.image_size, 1, 1)
+        origins, directions = [], []
+        for i in range(camera_pose_SE3.shape[0]):
+            origin, direction = self._get_ray(camera_pose_SE3[i])
+            origins.append(origin.flatten(end_dim=-2))
+            directions.append(direction.flatten(end_dim=-2))
+        origins = torch.cat(origins, dim=0)
+        directions = torch.cat(directions, dim=0)
+        rendered_pixels = self.render_ray(origins, directions, time_step)
+        image = rearrange(rendered_pixels, "(b h w) c -> b c h w", b=batch_size, h=self.image_height, w=self.image_width, c=3)
+        return image
