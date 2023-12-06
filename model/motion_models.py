@@ -80,13 +80,15 @@ class MotionModel(nn.Module):
 
         for time_step_index in range(num_time_steps):
             for basis_coefficient_index in range(num_basis_coefficients):
-                dct_basis_function_matrix[
-                    time_step_index, basis_coefficient_index
-                ] = torch.sqrt(2.0 / num_time_steps) * torch.cos(
-                    torch.pi
-                    / (2.0 * num_time_steps)
-                    * (2.0 * time_step_index + 1.0)
-                    * basis_coefficient_index
+                dct_basis_function_matrix[time_step_index, basis_coefficient_index] = (
+                    (2.0 / num_time_steps) ** 0.5
+                ) * torch.cos(
+                    torch.tensor(
+                        torch.pi
+                        / (2.0 * num_time_steps)
+                        * (2.0 * time_step_index + 1.0)
+                        * basis_coefficient_index
+                    )
                 )
 
         return dct_basis_function_matrix
@@ -176,14 +178,21 @@ class CameraMotionModel(MotionModel):
 
         if warmup:
             with torch.no_grad():
-                translation_basis_coefficients, rotation_basis_coefficients = torch.chunk(
-                    torch.index_select(self.basis_function_matrix, 0, torch.squeeze(time_step)),
+                (
+                    translation_basis_coefficients,
+                    rotation_basis_coefficients,
+                ) = torch.chunk(
+                    torch.index_select(
+                        self.basis_function_matrix, 0, torch.squeeze(time_step)
+                    ),
                     2,
                     dim=-1,
                 )
         else:
             translation_basis_coefficients, rotation_basis_coefficients = torch.chunk(
-                torch.index_select(self.basis_function_matrix, 0, torch.squeeze(time_step)),
+                torch.index_select(
+                    self.basis_function_matrix, 0, torch.squeeze(time_step)
+                ),
                 2,
                 dim=-1,
             )
