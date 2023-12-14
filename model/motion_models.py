@@ -25,12 +25,14 @@ class MotionModel(nn.Module):
 
         Args:
             num_basis_coefficients (int): The number of basis coefficients used for the DCT trajectory parametrization.
+            input_dim (int): The dimension of the input.
             output_dim (int): The dimension of the output.
             num_time_steps (int): The number of time steps in the trajectory.
             num_linear_layers (int, optional): The number of linear layers in the model. Defaults to 8.
             skip_connections (List[int], optional): The indices of the linear layers where skip connections are applied. Defaults to [4].
             hidden_dim (int, optional): The dimension of the hidden layers. Defaults to 256.
             positional_embedding_dim (int, optional): The dimension of the positional embedding. Defaults to 16.
+            num_matrices (int, optional): The number of dct basis function matrices in the model. Defaults to 1.
         """
         super().__init__()
 
@@ -163,6 +165,7 @@ class CameraMotionModel(MotionModel):
         Args:
             se3_coefficients (torch.Tensor): The se(3) coefficients. Shape: (batch_size, num_basis_coefficients*6)
             time_step (torch.Tensor): The time step. Shape: (batch_size, 1)
+            warmup (bool, optional): Whether to use the warmup mode. Defaults to False.
 
         Returns:
             torch.Tensor: The camera pose at the given time step. Shape: (batch_size, 6)
@@ -239,6 +242,7 @@ class CameraMotionModel(MotionModel):
 
         Args:
             time_step (torch.Tensor): The time step. Shape: (batch_size, 1)
+            warmup (bool, optional): Whether to use the warmup mode. Defaults to False.
 
         Returns:
             torch.Tensor: The se(3) camera pose at the given time step. Shape: (batch_size, 6)

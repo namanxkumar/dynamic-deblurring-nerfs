@@ -74,11 +74,15 @@ class SceneSpatialVoxelModel(nn.Module):
 
 
 class SceneSpatialDensityModel(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, type: str = "softplus") -> None:
         """
         Initializes the SceneSpatialDensityModel module.
+
+        Args:
+        - type (str): Type of the activation function.
         """
         super().__init__()
+        self.type = type
 
     def forward(self, spatial_voxel_features) -> torch.Tensor:
         """
@@ -90,7 +94,10 @@ class SceneSpatialDensityModel(nn.Module):
         Returns:
         - density (torch.Tensor): Density at the given location and time step. Shape: (batch_size, 1)
         """
-        return F.relu(spatial_voxel_features)
+        if self.type == "softplus":
+            return F.softplus(torch.sum(spatial_voxel_features, dim=-1))
+        elif self.type == "relu":
+            return F.relu(torch.sum(spatial_voxel_features, dim=-1))
 
 
 class SceneSpatialColorModel(nn.Module):

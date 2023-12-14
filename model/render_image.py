@@ -13,7 +13,8 @@ class RenderImage(nn.Module):
         self,
         camera_intrinsics: torch.Tensor,
         num_time_steps: int,
-        num_samples_per_ray: int,
+        num_coarse_samples_per_ray: int,
+        num_fine_samples_per_ray: int,
         near_depth: float,
         far_depth: float,
         num_scene_trajectory_basis_coefficients: int,
@@ -30,7 +31,8 @@ class RenderImage(nn.Module):
         Args:
         - camera_intrinsics (torch.Tensor): Camera intrinsics. Shape: (3, 3)
         - num_time_steps (int): Number of time steps.
-        - num_samples_per_ray (int): Number of samples per ray.
+        - num_coarse_samples_per_ray (int): Number of coarse samples per ray.
+        - num_fine_samples_per_ray (int): Number of fine samples per ray.
         - num_scene_trajectory_basis_coefficients (int): Number of coefficients for the scene trajectory basis.
         - num_camera_trajectory_basis_coefficients (int): Number of coefficients for the camera trajectory basis.
         - num_voxels_per_axis (int): Number of voxels per axis.
@@ -50,7 +52,8 @@ class RenderImage(nn.Module):
         )
         self.render_ray = RenderRay(
             num_time_steps=num_time_steps,
-            num_samples=num_samples_per_ray,
+            num_coarse_samples=num_coarse_samples_per_ray,
+            num_fine_samples=num_fine_samples_per_ray,
             near_depth=near_depth,
             far_depth=far_depth,
             num_scene_trajectory_basis_coefficients=num_scene_trajectory_basis_coefficients,
@@ -213,7 +216,12 @@ class RenderImage(nn.Module):
             ),
             direction,
         ).reshape(-1, 3)
-        origin = camera_pose[:, :3, 3].unsqueeze(1).repeat(1, direction.shape[0], 1).reshape(-1, 3)
+        origin = (
+            camera_pose[:, :3, 3]
+            .unsqueeze(1)
+            .repeat(1, direction.shape[0], 1)
+            .reshape(-1, 3)
+        )
 
         return origin, direction
 
@@ -222,13 +230,13 @@ class RenderImage(nn.Module):
         Performs forward pass of the RenderImage module.
 
         Args:
-        - time_step (torch.Tensor): Time step. Shape: (batch_size, 1)
+        - time_step (torch.Tensor): Time step. Shape: (batch_size)
 
         Returns:
         - image (torch.Tensor): Rendered image. Shape: (batch_size, 3, image_height, image_width)
         """
+        time_step = time_step.unsqueeze(-1)
         batch_size = time_step.shape[0]
-
         camera_pose_se3 = self.camera_motion_model(time_step, warmup)
         camera_pose_SE3 = self._se3_to_SE3(camera_pose_se3)
 

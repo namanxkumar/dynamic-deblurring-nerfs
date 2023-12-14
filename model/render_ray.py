@@ -10,12 +10,15 @@ from .spatial_model import (
     SceneSpatialColorModel,
 )
 
+from typing import Optional
+
 
 class RenderRay(nn.Module):
     def __init__(
         self,
         num_time_steps: int,
-        num_samples: int,
+        num_coarse_samples: int,
+        num_fine_samples: int,
         near_depth: float,
         far_depth: float,
         num_scene_trajectory_basis_coefficients: int,
@@ -29,11 +32,12 @@ class RenderRay(nn.Module):
         Initializes the RenderRay module.
 
         Args:
-        - num_samples (int): Number of samples on the ray.
-        - num_scene_trajectory_basis_coefficients (int): Number of coefficients for the scene trajectory basis.
+        - num_time_steps (int): Number of time steps.
+        - num_coarse_samples (int): Number of coarse samples.
+        - num_fine_samples (int): Number of fine samples.
         - near_depth (float): Near plane of the camera.
         - far_depth (float): Far plane of the camera.
-        - num_time_steps (int): Number of time steps.
+        - num_scene_trajectory_basis_coefficients (int): Number of coefficients for the scene trajectory basis.
         - num_voxels_per_axis (int): Number of voxels per voxel grid axis.
         - min_bound_per_axis (float): Minimum bound per voxel grid axis.
         - max_bound_per_axis (float): Maximum bound per voxel grid axis.
@@ -41,7 +45,8 @@ class RenderRay(nn.Module):
         - color_model_hidden_dim (int): Hidden dimension of the color model.
         """
         super().__init__()
-        self.num_samples = num_samples
+        self.num_coarse_samples = num_coarse_samples
+        self.num_fine_samples = num_fine_samples
 
         assert near_depth < far_depth, "Near depth must be less than far depth."
         assert (
@@ -66,8 +71,62 @@ class RenderRay(nn.Module):
             voxel_feature_dim=voxel_dim, hidden_dim=color_model_hidden_dim
         )
 
+    def _sample_probability_distribution(
+        bins: torch.Tensor,
+        weights: torch.Tensor,
+        num_samples: int,
+        deteministic: bool = False,
+    ) -> torch.Tensor:
+        """
+        Samples from a probability distribution of coarse samples. Copied from NeRF.
+        """
+        N_samples = num_samples
+        M = weights.shape[1]
+        weights += 1e-5
+        # Get pdf
+        pdf = weights / torch.sum(weights, dim=-1, keepdim=True)  # [N_rays, M]
+        cdf = torch.cumsum(pdf, dim=-1)  # [N_rays, M]
+        cdf = torch.cat([torch.zeros_like(cdf[:, 0:1]), cdf], dim=-1)  # [N_rays, M+1]
+
+        # Take uniform samples
+        if deteministic:
+            u = torch.linspace(0.0, 1.0, N_samples, device=bins.device)
+            u = u.unsqueeze(0).repeat(bins.shape[0], 1)  # [N_rays, N_samples]
+        else:
+            u = torch.rand(bins.shape[0], N_samples, device=bins.device)
+
+        # Invert CDF
+        above_inds = torch.zeros_like(u, dtype=torch.long)  # [N_rays, N_samples]
+        for i in range(M):
+            above_inds += (u >= cdf[:, i : i + 1]).long()
+
+        # random sample inside each bin
+        below_inds = torch.clamp(above_inds - 1, min=0)
+        inds_g = torch.stack((below_inds, above_inds), dim=2)  # [N_rays, N_samples, 2]
+
+        cdf = cdf.unsqueeze(1).repeat(1, N_samples, 1)  # [N_rays, N_samples, M+1]
+        cdf_g = torch.gather(input=cdf, dim=-1, index=inds_g)  # [N_rays, N_samples, 2]
+
+        bins = bins.unsqueeze(1).repeat(1, N_samples, 1)  # [N_rays, N_samples, M+1]
+        bins_g = torch.gather(
+            input=bins, dim=-1, index=inds_g
+        )  # [N_rays, N_samples, 2]
+
+        # fix numeric issue
+        denom = cdf_g[:, :, 1] - cdf_g[:, :, 0]  # [N_rays, N_samples]
+        denom = torch.where(denom < 1e-5, torch.ones_like(denom), denom)
+        t = (u - cdf_g[:, :, 0]) / denom
+
+        samples = bins_g[:, :, 0] + t * (bins_g[:, :, 1] - bins_g[:, :, 0])
+
+        return samples
+
     def _sample_points_on_ray(
-        self, ray_origin: torch.Tensor, ray_direction: torch.Tensor
+        self,
+        ray_origin: torch.Tensor,
+        ray_direction: torch.Tensor,
+        depth_values: Optional[torch.Tensor] = None,
+        weights: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Samples points on the ray.
@@ -75,24 +134,82 @@ class RenderRay(nn.Module):
         Args:
         - ray_origin (torch.Tensor): Origin of the ray. Shape: (batch_size, 3)
         - ray_direction (torch.Tensor): Direction of the ray. Shape: (batch_size, 3)
+        - depth_values (torch.Tensor): Depth values of the points sampled on the ray. Shape: (batch_size, num_samples)
+        - weights (torch.Tensor): Weights of the probability distribution. Shape: (batch_size, num_samples)
 
         Returns:
         - points_on_ray (torch.Tensor): Points sampled on the ray. Shape: (batch_size, num_samples, 3)
+        - depth_values (torch.Tensor): Depth values of the points sampled on the ray. Shape: (batch_size, num_samples)
         """
-        near_depth = self.near_depth * torch.ones_like(ray_direction[:, 2])
-        far_depth = self.far_depth * torch.ones_like(ray_direction[:, 2])
+        if weights is None and depth_values is None:
+            num_samples = self.num_coarse_samples
 
-        step = (far_depth - near_depth) / (self.num_samples - 1)
-        z_values = torch.stack(
-            [near_depth + i * step for i in range(self.num_samples)], dim=1
-        )
+            near_depth = self.near_depth * torch.ones_like(ray_direction[:, 2])
+            far_depth = self.far_depth * torch.ones_like(ray_direction[:, 2])
+
+            step = (far_depth - near_depth) / (num_samples - 1)
+            depth_values = torch.stack(
+                [near_depth + i * step for i in range(num_samples)], dim=1
+            )  # (B, N)
+        else:
+            num_samples = self.num_fine_samples
+            mid_depth_values = 0.5 * (
+                depth_values[..., 1:] + depth_values[..., :-1]
+            )  # (B, N-1)
+            weights = weights[:, 1:-1]  # (B, N-2)
+            sampled_depth_values = self._sample_probability_distribution(
+                mid_depth_values, weights, num_samples, deterministic=False
+            )  # (B, N)
+            depth_values, _ = torch.sort(
+                torch.cat((depth_values, sampled_depth_values), dim=-1), dim=-1
+            )  # (B, 2N-1)
 
         ray_direction = ray_direction.unsqueeze(1).repeat(
-            1, self.num_samples, 1
+            1, num_samples, 1
         )  # (B, N, 3)
-        ray_origin = ray_origin.unsqueeze(1).repeat(1, self.num_samples, 1)  # (B, N, 3)
+        ray_origin = ray_origin.unsqueeze(1).repeat(1, num_samples, 1)  # (B, N, 3)
 
-        return ray_origin + ray_direction * z_values.unsqueeze(-1)
+        return ray_origin + ray_direction * depth_values.unsqueeze(-1), depth_values
+
+    def _process_raw_spatial_outputs(
+        self,
+        raw_density: torch.Tensor,
+        raw_color: torch.Tensor,
+        depth_values: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Processes raw spatial outputs.
+
+        Args:
+        - raw_density (torch.Tensor): Raw density. Shape: (batch_size, num_samples, 1)
+        - raw_color (torch.Tensor): Raw color. Shape: (batch_size, num_samples, 3)
+        - depth_values (torch.Tensor): Depth values of the points sampled on the ray. Shape: (batch_size, num_samples)
+
+        Returns:
+        - density (torch.Tensor): Density. Shape: (batch_size, 1)
+        - color (torch.Tensor): Color. Shape: (batch_size, 3)
+        - weights (torch.Tensor): Weights. Shape: (batch_size, num_samples)
+        """
+        distances = depth_values[..., 1:] - depth_values[..., :-1]
+        distances = torch.cat(
+            [
+                distances,
+                torch.Tensor([1e10]).expand(
+                    distances[:, :1].shape
+                ),  # final distance segment is ~infinite
+            ],
+            dim=-1,
+        )  # (B, N)
+
+        alpha = 1.0 - torch.exp(-raw_density.squeeze(-1) * distances)  # (B, N)
+        T = torch.cumprod(1.0 - alpha + 1e-10, dim=-1)[:, :-1]
+        T = torch.cat((torch.ones_like(T[:, 0:1]), T), dim=-1)
+        weights = T * alpha
+
+        depth = torch.sum(weights * depth_values, dim=-1).unsqueeze(-1)  # (B, 1)
+        color = torch.sum(weights.unsqueeze(-1) * raw_color, dim=-2)  # (B, 3)
+
+        return depth, color, weights
 
     def forward(
         self,
@@ -110,19 +227,44 @@ class RenderRay(nn.Module):
         - view_direction (torch.Tensor): View direction of the ray. Shape: (batch_size, 3)
 
         Returns:
-        - rgb_map (torch.Tensor): RGB values of the rendered scene. Shape: (batch_size, 3)
+        - color_map (torch.Tensor): RGB values of the rendered scene. Shape: (batch_size, 3)
         """
         batch_size = ray_origin.shape[0]
-        points_on_ray = self._sample_points_on_ray(ray_origin, ray_direction)
+
+        with torch.no_grad():
+            coarse_points_on_ray, coarse_depth_values = self._sample_points_on_ray(
+                ray_origin, ray_direction
+            )
+            coarse_warped_points_on_ray = self.scene_motion_model(
+                coarse_points_on_ray.reshape(-1, 3), time_step
+            )
+            coarse_spatial_voxel_features = self.spatial_voxel_model(
+                coarse_warped_points_on_ray
+            )
+            coarse_raw_density = self.spatial_density_model(
+                coarse_spatial_voxel_features
+            )
+            coarse_raw_color = self.spatial_color_model(
+                coarse_spatial_voxel_features, ray_direction
+            )
+            _, _, coarse_weights = self._process_raw_spatial_outputs(
+                rearrange(coarse_raw_density, "(b n) 1 -> b n 1", b=batch_size),
+                rearrange(coarse_raw_color, "(b n) 3 -> b n 3", b=batch_size),
+                depth_values,
+            )
+
+        points_on_ray, depth_values = self._sample_points_on_ray(
+            ray_origin, ray_direction, coarse_depth_values, coarse_weights
+        )
         warped_points_on_ray = self.scene_motion_model(
             points_on_ray.reshape(-1, 3), time_step
         )
         spatial_voxel_features = self.spatial_voxel_model(warped_points_on_ray)
-        density = self.spatial_density_model(spatial_voxel_features)
-        color = self.spatial_color_model(spatial_voxel_features, ray_direction)
-        rgb_map = density * color
-        rgb_map = rearrange(
-            rgb_map, "(b n) c -> b n c", b=batch_size, n=self.num_samples
+        raw_density = self.spatial_density_model(spatial_voxel_features)
+        raw_color = self.spatial_color_model(spatial_voxel_features, ray_direction)
+        _, color_map, _ = self._process_raw_spatial_outputs(
+            rearrange(raw_density, "(b n) 1 -> b n 1", b=batch_size),
+            rearrange(raw_color, "(b n) 3 -> b n 3", b=batch_size),
+            depth_values,
         )
-        rgb_map = torch.sum(rgb_map, dim=1)
-        return rgb_map
+        return color_map
