@@ -162,10 +162,10 @@ class Trainer:
             disable=not self.accelerator.is_main_process,
         ) as progress_bar:
             while self.step.step < self.num_steps:
-                sample = next(self.train_yielder).to(self.accelerator.device)
-                output = self.model(sample["time_step"], warmup=False)
+                sample = next(self.train_yielder)
+                output = self.model(sample["time_step"].to(self.accelerator.device), warmup=False)
 
-                loss = self._calculate_losses(output, sample)
+                loss = self._calculate_losses(output.to(self.accelerator.device), sample.to(self.accelerator.device))
 
                 self.accelerator.backward(loss)
 
