@@ -103,7 +103,7 @@ class Model(nn.Module):
         pixel_indices = pixel_indices.reshape(-1, 2)  # Shape: (num_pixels, 2)
         time_step_batch = torch.ones(
             pixel_indices.shape[0], self.num_time_steps_per_frame
-        )  # Shape: (num_pixels, num_time_steps_per_frame)
+        ).to(self.device)  # Shape: (num_pixels, num_time_steps_per_frame)
         time_step_batch = (
             torch.arange(
                 -(self.num_time_steps_per_frame // 2),
