@@ -47,7 +47,7 @@ class MotionModel(nn.Module):
         self.skip_connections = skip_connections
 
         self.positional_embedding = PositionalEmbedding(
-            embedding_dim=positional_embedding_dim
+            embedding_dim=positional_embedding_dim, device=self.device
         )
 
         self.linear_layers = nn.ModuleList(

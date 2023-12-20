@@ -4,7 +4,7 @@ import math
 
 
 class PositionalEmbedding(nn.Module):
-    def __init__(self, embedding_dim: int, theta: int = 10000):
+    def __init__(self, embedding_dim: int, device: torch.device, theta: int = 10000):
         """
         Positional Embedding module for adding positional information to input tensors.
 
@@ -15,6 +15,7 @@ class PositionalEmbedding(nn.Module):
         super().__init__()
         self.embedding_dim = embedding_dim
         self.theta = theta
+        self.device = device
 
     def forward(self, positions: Tensor) -> Tensor:
         """
@@ -27,9 +28,10 @@ class PositionalEmbedding(nn.Module):
             Tensor: The tensor with positional embeddings concatenated with the input positions. Shape: (seq_len, embedding_dim)
         """
         embedding = math.log(self.theta) / ((self.embedding_dim // 2) - 1)
-        embedding = torch.exp(torch.arange((self.embedding_dim // 2)) * -embedding)
+        embedding = torch.exp(
+            torch.arange((self.embedding_dim // 2).to(self.device)) * -embedding
+        )
         embedding = positions[:, None] * embedding[None, :]
         embedding = torch.cat((embedding.sin(), embedding.cos()), dim=-1)
-        
-        return embedding
 
+        return embedding
