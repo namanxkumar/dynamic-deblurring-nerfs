@@ -29,7 +29,7 @@ class PositionalEmbedding(nn.Module):
         """
         embedding = math.log(self.theta) / ((self.embedding_dim // 2) - 1)
         embedding = torch.exp(
-            torch.arange((self.embedding_dim // 2).to(self.device)) * -embedding
+            torch.arange((self.embedding_dim // 2)).to(self.device) * -embedding
         )
         embedding = positions[:, None] * embedding[None, :]
         embedding = torch.cat((embedding.sin(), embedding.cos()), dim=-1)
