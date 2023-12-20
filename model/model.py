@@ -65,7 +65,7 @@ class Model(nn.Module):
             time_step.shape[0], self.num_time_steps_per_frame
         ).to(self.device)
         time_step_batch = (
-            torch.arange(-(self.num_time_steps_per_frame//2), (self.num_time_steps_per_frame//2) + 1) * time_step_batch
+            torch.arange(-(self.num_time_steps_per_frame//2), (self.num_time_steps_per_frame//2) + 1).to(self.device) * time_step_batch
         )  # Shape: (batch_size, num_time_steps_per_frame)
         time_step_batch = (
             time_step_batch + time_step[:, None]
