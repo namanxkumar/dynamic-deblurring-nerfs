@@ -87,7 +87,7 @@ class Render(nn.Module):
         denominator = torch.tensor([1], dtype=torch.float32).to(self.device)
         for i in range(n_terms + 1):
             if i > 0:
-                denominator *= (2 * i + 1) * (2 * i)
+                denominator = denominator * (2 * i + 1) * (2 * i)
             A = A + (-1) ** i * x ** (2 * i) / denominator
         return A
 
@@ -105,7 +105,7 @@ class Render(nn.Module):
         B = torch.zeros_like(x).to(self.device)
         denominator = torch.tensor([1], dtype=torch.float32).to(self.device)
         for i in range(n_terms + 1):
-            denominator *= (2 * i + 1) * (2 * i + 2)
+            denominator = denominator * (2 * i + 1) * (2 * i + 2)
             B = B + (-1) ** i * x ** (2 * i) / denominator
         return B
 
@@ -123,7 +123,7 @@ class Render(nn.Module):
         C = torch.zeros_like(x).to(self.device)
         denominator = torch.tensor([1], dtype=torch.float32).to(self.device)
         for i in range(n_terms + 1):
-            denominator *= (2 * i + 2) * (2 * i + 3)
+            denominator = denominator * (2 * i + 2) * (2 * i + 3)
             C = C + (-1) ** i * x ** (2 * i) / denominator
         return C
 
@@ -221,8 +221,7 @@ class Render(nn.Module):
         if pixel_x is not None and pixel_y is not None:
             xi, yi = pixel_x, pixel_y
 
-            direction = torch.stack((xi, yi, torch.ones_like(xi)), dim=-1)
-            direction = direction.unsqueeze(0)
+            direction = torch.stack((xi, yi, torch.ones_like(xi)), dim=-1).to(self.device).float().unsqueeze(-2)
         else:
             xi, yi = torch.meshgrid(
                 torch.arange(self.camera_intrinsics[0, 2] * 2),
@@ -230,18 +229,17 @@ class Render(nn.Module):
                 indexing="xy",
             )
             xi, yi = xi.reshape(-1), yi.reshape(-1)  # (image_height*image_width)
+            direction = torch.stack((xi, yi, torch.ones_like(xi)), dim=-1).to(self.device)
+            direction = direction.unsqueeze(0).repeat(batch_size, 1, 1)
 
-            direction = torch.stack((xi, yi, torch.ones_like(xi)), dim=-1)
-            direction = direction.to(self.device).unsqueeze(0).repeat(batch_size, 1, 1)
+        a = torch.bmm(
+            camera_pose[:, :3, :3].transpose(1, 2),
+            self.inverse_camera_intrinsics.unsqueeze(0).repeat(batch_size, 1, 1),
+        )
 
         direction = (
             torch.bmm(
-                torch.bmm(
-                    camera_pose[:, :3, :3].transpose(1, 2),
-                    self.inverse_camera_intrinsics.unsqueeze(0).repeat(
-                        batch_size, 1, 1
-                    ),
-                ),
+                a,
                 direction.transpose(1, 2),
             )
             .transpose(1, 2)
@@ -279,7 +277,11 @@ class Render(nn.Module):
             ray_origin,
             ray_direction,
             time_step.repeat(
-                self.camera_intrinsics[0, 2].int().item() * 2 * self.camera_intrinsics[1, 2].int().item() * 2, 1
+                self.camera_intrinsics[0, 2].int().item()
+                * 2
+                * self.camera_intrinsics[1, 2].int().item()
+                * 2,
+                1,
             ),
         )
 
