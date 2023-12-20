@@ -52,6 +52,8 @@ class Trainer:
         self,
         batch_size: int = 4,
         num_chunks: int = 1,
+        num_frames_offset: int = 0,
+        num_frames: int = None,
         num_steps: int = 10000,
         num_steps_per_save: int = 1000,
         learning_rate: float = 1e-4,
@@ -93,6 +95,8 @@ class Trainer:
             num_frames_per_blur=num_time_steps_per_frame,
             downscale_factor=image_downscale_factor,
             num_chunks=num_chunks,
+            offset=num_frames_offset,
+            num_frames=num_frames,
         )
 
         self.model = Model(
