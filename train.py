@@ -24,6 +24,23 @@ from pathlib import Path
 def exists(val):
     return val is not None
 
+class Step:
+    def __init__(self, step: int, batch_size: int):
+        self.step = step
+        self.batch_size = batch_size
+
+    def load_state_dict(self, state_dict: dict):
+        self.step = state_dict["step"]
+        self.batch_size = (
+            state_dict["batch_size"] if "batch_size" in state_dict else self.batch_size
+        )
+
+    def state_dict(self):
+        state_dict = {
+            "step": self.step,
+            "batch_size": self.batch_size,
+        }
+        return state_dict
 
 class Trainer:
     def __init__(
@@ -37,6 +54,7 @@ class Trainer:
         sharp_directory: str = "data/adobe240singulardataset/train/GOPR9647/",
         results_directory: str = "results/",
         image_extension: str = "png",
+        image_downscale_factor: int = 1,
         num_time_steps_per_frame: int = 7,
         num_coarse_samples_per_ray: int = 64,
         num_fine_samples_per_ray: int = 128,
@@ -64,6 +82,7 @@ class Trainer:
             sharp_directory=sharp_directory,
             image_extension=image_extension,
             num_frames_per_blur=num_time_steps_per_frame,
+            downscale_factor=image_downscale_factor,
         )
 
         self.model = Model(
@@ -101,7 +120,7 @@ class Trainer:
             self.model, self.optimizer, self.dataloader
         )
 
-        self.step = 0
+        self.step = Step(0, self.batch_size)
         self.accelerator.register_for_checkpointing(self.step)
         self.train_yielder = self._yield_data(self.dataloader)
 
@@ -142,7 +161,7 @@ class Trainer:
             total=self.num_steps,
             disable=not self.accelerator.is_main_process,
         ) as progress_bar:
-            while self.step < self.num_steps:
+            while self.step.step < self.num_steps:
                 sample = next(self.train_yielder).to(self.accelerator.device)
                 output = self.model(sample["time_step"], warmup=False)
 
@@ -163,7 +182,7 @@ class Trainer:
                 if exists(self.inject_function):
                     self.inject_function(self.step, loss)
 
-                self.step += 1
+                self.step.step += 1
 
                 progress_bar.update(1)
 
