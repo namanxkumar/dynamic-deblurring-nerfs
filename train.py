@@ -32,7 +32,7 @@ class Trainer:
         num_steps: int = 10000,
         num_steps_per_save: int = 1000,
         learning_rate: float = 1e-4,
-        inject_function: function = None,
+        inject_function = None,
         blur_directory: str = "data/adobe240singulardataset/train_blur/GOPR9647/",
         sharp_directory: str = "data/adobe240singulardataset/train/GOPR9647/",
         results_directory: str = "results/",
