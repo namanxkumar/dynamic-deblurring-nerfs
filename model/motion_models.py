@@ -132,7 +132,7 @@ class CameraMotionModel(MotionModel):
         num_linear_layers: int = 16,
         skip_connections: List[int] = [4, 8, 12],
         hidden_dim: int = 256,
-        positional_embedding_dim: int = 32,
+        positional_embedding_dim: int = 8,
     ) -> None:
         """
         Initializes the CameraMotionModel.
@@ -311,8 +311,8 @@ class SceneMotionModel(MotionModel):
         device: torch.device,
         num_linear_layers: int = 8,
         skip_connections: List[int] = [4],
-        hidden_dim: int = 256,
-        positional_embedding_dim: int = 16,
+        hidden_dim: int = 128,
+        positional_embedding_dim: int = 4,
     ) -> None:
         super().__init__(
             num_basis_coefficients=num_basis_coefficients,

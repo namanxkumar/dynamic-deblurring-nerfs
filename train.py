@@ -60,13 +60,13 @@ class Trainer:
         num_fine_samples_per_ray: int = 128,
         near_depth: float = 0.1,
         far_depth: float = 10.0,
-        num_scene_trajectory_basis_coefficients: int = 48,
-        num_camera_trajectory_basis_coefficients: int = 48,
+        num_scene_trajectory_basis_coefficients: int = 24,
+        num_camera_trajectory_basis_coefficients: int = 24,
         num_voxels_per_axis: int = 128,
         min_bound_per_axis: float = 1.0,
         max_bound_per_axis: float = 10.0,
-        voxel_dim: int = 64,
-        color_model_hidden_dim: int = 128,
+        voxel_dim: int = 16,
+        color_model_hidden_dim: int = 64,
     ):
         self.num_steps = num_steps
         self.num_steps_per_save = num_steps_per_save
