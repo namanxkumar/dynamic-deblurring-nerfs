@@ -157,7 +157,7 @@ class Trainer:
 
     def train(self):
         with tqdm(
-            initial=self.step,
+            initial=self.step.step,
             total=self.num_steps,
             disable=not self.accelerator.is_main_process,
         ) as progress_bar:
