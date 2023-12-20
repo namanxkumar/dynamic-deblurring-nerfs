@@ -32,6 +32,7 @@ class Trainer:
         num_steps: int = 10000,
         num_steps_per_save: int = 1000,
         learning_rate: float = 1e-4,
+        inject_function: function = None,
         blur_directory: str = "data/adobe240singulardataset/train_blur/GOPR9647/",
         sharp_directory: str = "data/adobe240singulardataset/train/GOPR9647/",
         results_directory: str = "results/",
@@ -52,6 +53,8 @@ class Trainer:
         self.num_steps = num_steps
         self.num_steps_per_save = num_steps_per_save
 
+        self.inject_function = inject_function
+        
         self.results_directory = Path(results_directory)
 
         self.accelerator = Accelerator()
@@ -156,6 +159,9 @@ class Trainer:
                 self.optimizer.zero_grad()
 
                 self.accelerator.wait_for_everyone()
+
+                if exists(self.inject_function):
+                    self.inject_function(self.step, loss)
 
                 self.step += 1
 
