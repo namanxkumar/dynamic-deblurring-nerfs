@@ -1,6 +1,6 @@
-from .dataset import Adobe240Singular
+from dataset import Adobe240Singular
 from model.model import Model
-from .losses import blur_combination_loss
+from losses import blur_combination_loss
 
 from accelerate import Accelerator
 
