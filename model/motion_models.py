@@ -14,6 +14,7 @@ class MotionModel(nn.Module):
         input_dim: int,
         output_dim: int,
         num_time_steps: int,
+        device: torch.device,
         num_linear_layers: int = 8,
         skip_connections: List[int] = [4],
         hidden_dim: int = 256,
@@ -35,6 +36,7 @@ class MotionModel(nn.Module):
             num_matrices (int, optional): The number of dct basis function matrices in the model. Defaults to 1.
         """
         super().__init__()
+        self.device = device
 
         self.basis_function_matrix = nn.Parameter(
             self._initialize_dct_basis_function_matrix(
@@ -49,22 +51,21 @@ class MotionModel(nn.Module):
         )
 
         self.linear_layers = nn.ModuleList(
-            [nn.Linear(input_dim + positional_embedding_dim, hidden_dim)]
+            [nn.Linear(input_dim + (positional_embedding_dim*input_dim), hidden_dim)]
             + [
                 nn.Linear(hidden_dim, hidden_dim)
                 if layer_index not in skip_connections
-                else nn.Linear(hidden_dim + 4, hidden_dim)
+                else nn.Linear(hidden_dim + input_dim + (positional_embedding_dim*input_dim), hidden_dim)
                 for layer_index in range(num_linear_layers - 1)
             ]
         )
 
-        self.output_layer = nn.Linear(hidden_dim, num_basis_coefficients * output_dim)
+        self.output_layer = nn.Linear(hidden_dim, (num_basis_coefficients // num_matrices) * output_dim)
         self.output_layer.weight.data.fill_(0.0)
         self.output_layer.bias.data.fill_(0.0)
 
-    @staticmethod
     def _initialize_dct_basis_function_matrix(
-        num_time_steps: int, num_basis_coefficients: int
+        self, num_time_steps: int, num_basis_coefficients: int
     ) -> torch.Tensor:
         """
         Initializes the DCT basis function matrix.
@@ -78,7 +79,7 @@ class MotionModel(nn.Module):
         """
         dct_basis_function_matrix = torch.zeros(
             [num_time_steps, num_basis_coefficients]
-        )
+        ).to(self.device)
 
         for time_step_index in range(num_time_steps):
             for basis_coefficient_index in range(num_basis_coefficients):
@@ -127,6 +128,7 @@ class CameraMotionModel(MotionModel):
         self,
         num_basis_coefficients: int,
         num_time_steps: int,
+        device: torch.device,
         num_linear_layers: int = 16,
         skip_connections: List[int] = [4, 8, 12],
         hidden_dim: int = 256,
@@ -148,6 +150,7 @@ class CameraMotionModel(MotionModel):
             * 2,  # half for translation, half for rotation
             input_dim=1,
             output_dim=6,
+            device=device,
             num_time_steps=num_time_steps,
             num_linear_layers=num_linear_layers,
             skip_connections=skip_connections,
@@ -178,7 +181,7 @@ class CameraMotionModel(MotionModel):
             rotation_coefficient_y,
             rotation_coefficient_z,
         ) = torch.chunk(se3_coefficients, 6, dim=-1)
-
+        
         if warmup:
             with torch.no_grad():
                 (
@@ -186,20 +189,20 @@ class CameraMotionModel(MotionModel):
                     rotation_basis_coefficients,
                 ) = torch.chunk(
                     torch.index_select(
-                        self.basis_function_matrix, 0, torch.squeeze(time_step)
-                    ),
+                        self.basis_function_matrix, 0, torch.squeeze(time_step).int()
+                    ).to(self.device),
                     2,
                     dim=-1,
                 )
         else:
             translation_basis_coefficients, rotation_basis_coefficients = torch.chunk(
                 torch.index_select(
-                    self.basis_function_matrix, 0, torch.squeeze(time_step)
-                ),
+                    self.basis_function_matrix, 0, torch.squeeze(time_step).int()
+                ).to(self.device),
                 2,
                 dim=-1,
             )
-
+        
         return torch.cat(
             [
                 torch.sum(
@@ -251,7 +254,9 @@ class CameraMotionModel(MotionModel):
             (
                 time_step,
                 torch.reshape(
-                    self.positional_embedding(torch.squeeze(time_step)),
+                    self.positional_embedding.forward(torch.squeeze(time_step)).to(
+                        self.device
+                    ),
                     (time_step.shape[0], -1),
                 ),
             ),
@@ -303,6 +308,7 @@ class SceneMotionModel(MotionModel):
         self,
         num_basis_coefficients: int,
         num_time_steps: int,
+        device: torch.device,
         num_linear_layers: int = 8,
         skip_connections: List[int] = [4],
         hidden_dim: int = 256,
@@ -312,6 +318,7 @@ class SceneMotionModel(MotionModel):
             num_basis_coefficients=num_basis_coefficients,
             input_dim=3 + 1,
             output_dim=3,
+            device=device,
             num_time_steps=num_time_steps,
             num_linear_layers=num_linear_layers,
             skip_connections=skip_connections,
@@ -339,8 +346,8 @@ class SceneMotionModel(MotionModel):
         ) = torch.chunk(position_coefficients, 3, dim=-1)
 
         basis_coefficients = torch.index_select(
-            self.basis_function_matrix, 0, torch.squeeze(time_step)
-        )
+            self.basis_function_matrix, 0, torch.squeeze(time_step).int()
+        ).to(self.device)
 
         return torch.cat(
             [
@@ -371,17 +378,20 @@ class SceneMotionModel(MotionModel):
             torch.Tensor: The warped point at the given time step. Shape: (batch_size, 3)
         """
         embeddings = torch.cat((sample_points, time_step), dim=-1)
+
         embeddings = torch.cat(
             (
                 embeddings,
                 torch.reshape(
-                    self.positional_embedding(torch.flatten(embeddings)),
+                    self.positional_embedding.forward(torch.flatten(embeddings)).to(
+                        self.device
+                    ),
                     (embeddings.shape[0], -1),
                 ),
             ),
             dim=-1,
         )
-
+        
         hidden_state = embeddings
 
         for index in range(len(self.linear_layers)):

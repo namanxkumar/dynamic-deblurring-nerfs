@@ -16,6 +16,7 @@ class SceneSpatialVoxelModel(nn.Module):
         min_bound_per_axis: float,
         max_bound_per_axis: float,
         voxel_dim: int,
+        device: torch.device,
     ) -> None:
         """
         Initializes the SceneSpatialVoxelModel module.
@@ -27,6 +28,8 @@ class SceneSpatialVoxelModel(nn.Module):
         - voxel_dim (int): Dimension of the voxel.
         """
         super().__init__()
+        self.device = device
+
         self.min_bound = min_bound_per_axis
         self.max_bound = max_bound_per_axis
         self.voxel_dim = voxel_dim
@@ -41,7 +44,7 @@ class SceneSpatialVoxelModel(nn.Module):
                     num_voxels_per_axis,
                 ),
                 dtype=torch.float32,
-            )
+            ).to(self.device)
         )
 
     def forward(
@@ -67,14 +70,18 @@ class SceneSpatialVoxelModel(nn.Module):
                 normalized_sample_points[None, None, None, ...],
                 mode="bilinear",
                 align_corners=True,
-            )
+            ).to(self.device)
         )
 
         return rearrange(features, "c b -> b c")
 
 
 class SceneSpatialDensityModel(nn.Module):
-    def __init__(self, type: str = "softplus") -> None:
+    def __init__(
+        self,
+        device: torch.device,
+        type: str = "softplus",
+    ) -> None:
         """
         Initializes the SceneSpatialDensityModel module.
 
@@ -82,6 +89,8 @@ class SceneSpatialDensityModel(nn.Module):
         - type (str): Type of the activation function.
         """
         super().__init__()
+        self.device = device
+
         self.type = type
 
     def forward(self, spatial_voxel_features) -> torch.Tensor:
@@ -95,18 +104,19 @@ class SceneSpatialDensityModel(nn.Module):
         - density (torch.Tensor): Density at the given location and time step. Shape: (batch_size, 1)
         """
         if self.type == "softplus":
-            return F.softplus(torch.sum(spatial_voxel_features, dim=-1))
+            return F.softplus(torch.sum(spatial_voxel_features, dim=-1)).unsqueeze(-1)
         elif self.type == "relu":
-            return F.relu(torch.sum(spatial_voxel_features, dim=-1))
+            return F.relu(torch.sum(spatial_voxel_features, dim=-1)).unsqueeze(-1)
 
 
 class SceneSpatialColorModel(nn.Module):
     def __init__(
         self,
-        voxel_feature_dim,
-        hidden_dim,
-        voxel_feature_positional_embedding_dim=6,
-        view_direction_positional_embedding_dim=6,
+        voxel_feature_dim: int,
+        hidden_dim: int,
+        device: torch.device,
+        voxel_feature_positional_embedding_dim: int = 6,
+        view_direction_positional_embedding_dim: int = 6,
     ) -> None:
         """
         Initializes the SceneSpatialColorModel module.
@@ -118,16 +128,18 @@ class SceneSpatialColorModel(nn.Module):
         - view_direction_positional_embedding_dim (int): Dimension of the positional embedding for view directions.
         """
         super().__init__()
-        self.voxel_feature_positional_embedding = PositionalEmbedding(
-            voxel_feature_positional_embedding_dim
-        )
-        self.view_direction_positional_embedding = PositionalEmbedding(
-            view_direction_positional_embedding_dim
-        )
+        self.device = device
+
+        # self.voxel_feature_positional_embedding = PositionalEmbedding(
+        #     voxel_feature_positional_embedding_dim
+        # )
+        # self.view_direction_positional_embedding = PositionalEmbedding(
+        #     view_direction_positional_embedding_dim
+        # )
 
         self.interstitial_feature_mlp = torch.nn.Sequential(
             torch.nn.Linear(
-                voxel_feature_dim + voxel_feature_positional_embedding_dim,
+                voxel_feature_dim,
                 hidden_dim,
             ),
             torch.nn.ReLU(),
@@ -136,7 +148,7 @@ class SceneSpatialColorModel(nn.Module):
         )
 
         self.view_mlp = torch.nn.Linear(
-            hidden_dim + view_direction_positional_embedding_dim, 3
+            hidden_dim + 3, 3
         )
 
     def forward(self, spatial_voxel_features, view_direction):
@@ -150,28 +162,28 @@ class SceneSpatialColorModel(nn.Module):
         Returns:
         - color (torch.Tensor): Color at the given location. Shape: (batch_size, 3)
         """
-        feature_encoding = torch.cat(
-            (
-                spatial_voxel_features,
-                self.voxel_feature_positional_embedding(spatial_voxel_features),
-            ),
-            dim=-1,
-        )
-        interstitial_features = self.interstitial_feature_mlp(feature_encoding)
+        # feature_encoding = torch.cat(
+        #     (
+        #         spatial_voxel_features,
+        #         self.voxel_feature_positional_embedding.forward(spatial_voxel_features).to(self.device),
+        #     ),
+        #     dim=-1,
+        # )
+        interstitial_features = self.interstitial_feature_mlp(spatial_voxel_features)
 
-        view_direction_encoding = torch.cat(
-            (
-                view_direction,
-                self.view_direction_positional_embedding(view_direction),
-            ),
-            dim=-1,
-        )
+        # view_direction_encoding = torch.cat(
+        #     (
+        #         view_direction,
+        #         self.view_direction_positional_embedding.forward(view_direction).to(self.device),
+        #     ),
+        #     dim=-1,
+        # )
 
         view_features = self.view_mlp(
             torch.cat(
                 (
                     interstitial_features,
-                    view_direction_encoding,
+                    view_direction,
                 ),
                 dim=-1,
             )
