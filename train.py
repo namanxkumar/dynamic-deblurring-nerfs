@@ -179,7 +179,7 @@ class Trainer:
                 sample = next(self.train_yielder)
                 total_loss = 0.0
                 
-                for chunk_index in tqdm(range(self.dataset.num_chunks), leave=False):
+                for chunk_index in tqdm(range(self.dataset.num_chunks), leave=False, desc="Chunks"):
                     output = self.model(
                         time_step=sample["time_step"].to(self.accelerator.device),
                         pixel_indices=sample["pixel_indices"][:, chunk_index, ...].to(
@@ -192,7 +192,7 @@ class Trainer:
                     total_loss += loss.item()
                     self.accelerator.backward(loss)
 
-                progress_bar.set_description(f"Loss: {total_loss:.4f} ")
+                progress_bar.set_description(f"Loss: {total_loss:.4f}")
 
                 self.accelerator.wait_for_everyone()
 

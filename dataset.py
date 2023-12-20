@@ -24,6 +24,8 @@ class Adobe240Singular(Dataset):
         num_frames_per_blur: int = 7,
         image_extension: str = "png",
         downscale_factor: int = 4,
+        offset: int = 0,
+        num_frames: int = None,
     ):
         self.blur_directory = blur_directory
         self.sharp_directory = sharp_directory
@@ -37,6 +39,9 @@ class Adobe240Singular(Dataset):
             glob(osp.join(self.blur_directory, f"*.{self.image_extension}")),
             key=extract_index,
         )
+
+        if num_frames is not None:
+            self.blur_image_paths = self.blur_image_paths[offset:offset + num_frames]
 
         self.downscale_factor = downscale_factor
         self.image_height = (
@@ -115,6 +120,8 @@ class Adobe240SingularPixels(Dataset):
         image_extension: str = "png",
         downscale_factor: int = 4,
         num_chunks: int = 1,
+        offset: int = 0,
+        num_frames: int = None,
     ):
         self.blur_directory = blur_directory
         self.sharp_directory = sharp_directory
@@ -128,6 +135,9 @@ class Adobe240SingularPixels(Dataset):
             glob(osp.join(self.blur_directory, f"*.{self.image_extension}")),
             key=extract_index,
         )
+
+        if num_frames is not None:
+            self.blur_image_paths = self.blur_image_paths[offset:offset + num_frames]
 
         self.downscale_factor = downscale_factor
         self.image_height = (
